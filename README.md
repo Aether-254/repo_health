@@ -1,5 +1,6 @@
 # github-repo-health
 [![Release](https://github.com/Aether-254/repo_health/actions/workflows/release.yml/badge.svg)](https://github.com/Aether-254/repo_health/actions/workflows/release.yml) [![ci](https://github.com/Aether-254/repo_health/actions/workflows/ci.yml/badge.svg)](https://github.com/Aether-254/repo_health/actions/workflows/ci.yml)
+
 A small Python 3.12 CLI app that scans any GitHub repository and prints a clean health summary as Markdown.
 
 It reports:
@@ -141,7 +142,6 @@ GitHub Actions includes:
 - Dependabot version updates
 - PyInstaller release binaries for:
   - `arm64darwin`
-  - `amd64darwin`
   - `arm64win`
   - `amd64win`
   - `x86win`
