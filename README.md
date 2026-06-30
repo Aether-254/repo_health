@@ -53,6 +53,7 @@ repo-health https://github.com/openai/codex
 Private repositories use PyGithub and require `GITHUB_API_KEY` in `.env`:
 
 ```bash
+python -m pip install -e ".[private]"
 repo-health your-org/private-repo --private
 ```
 

@@ -1,8 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
-from github import UnknownObjectException
-
 from github_requests_cli.cli import (
     RepoHealth,
     github_client,
@@ -15,8 +13,12 @@ from github_requests_cli.cli import (
 )
 
 
+class UnknownObjectException(Exception):
+    status = 404
+
+
 def unknown_object() -> UnknownObjectException:
-    return UnknownObjectException(404, {"message": "Not Found"}, None)
+    return UnknownObjectException("Not Found")
 
 
 class FakeRepo:

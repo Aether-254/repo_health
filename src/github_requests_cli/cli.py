@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Protocol
 
 import requests
-from github import Github, GithubException, UnknownObjectException
 
 REPOSITORY_RE = re.compile(
     r"^(?:https?://github\.com/)?(?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+?)(?:\.git)?/?$"
@@ -121,9 +120,15 @@ def normalize_repository(value: str) -> str:
     return f"{match.group('owner')}/{match.group('repo')}"
 
 
-def github_client(token: str | None) -> Github:
+def github_client(token: str | None) -> object:
     if not token:
         raise ValueError("Private repository scans require GITHUB_API_KEY in .env or --token.")
+    try:
+        from github import Github
+    except ImportError as exc:
+        raise ValueError(
+            "Private repository scans require PyGithub. Install with `pip install -e .[private]`."
+        ) from exc
     return Github(token)
 
 
@@ -199,7 +204,9 @@ def human_age(since: datetime | None, *, now: datetime | None = None) -> str:
 def has_readme(repo) -> bool:
     try:
         repo.get_readme()
-    except UnknownObjectException:
+    except Exception as exc:
+        if not is_github_not_found(exc):
+            raise
         return False
     return True
 
@@ -207,7 +214,9 @@ def has_readme(repo) -> bool:
 def has_ci_workflow(repo) -> bool:
     try:
         workflows = repo.get_contents(".github/workflows")
-    except UnknownObjectException:
+    except Exception as exc:
+        if not is_github_not_found(exc):
+            raise
         return False
 
     if not isinstance(workflows, list):
@@ -219,7 +228,9 @@ def has_ci_workflow(repo) -> bool:
 def license_info(repo) -> tuple[bool, str | None]:
     try:
         license_file = repo.get_license()
-    except UnknownObjectException:
+    except Exception as exc:
+        if not is_github_not_found(exc):
+            raise
         return False, None
 
     license_name = None
@@ -227,6 +238,13 @@ def license_info(repo) -> tuple[bool, str | None]:
         license_name = getattr(license_file.license, "name", None)
 
     return True, license_name
+
+
+def is_github_not_found(exc: Exception) -> bool:
+    status = getattr(exc, "status", None)
+    if status == 404:
+        return True
+    return exc.__class__.__name__ == "UnknownObjectException"
 
 
 def scan_repository(client: GithubClient, repository: str) -> RepoHealth:
@@ -421,7 +439,9 @@ def main(argv: list[str] | None = None) -> int:
     except requests.RequestException as exc:
         print(f"GitHub API is not reachable: {exc}", file=sys.stderr)
         return 1
-    except GithubException as exc:
+    except Exception as exc:
+        if not exc.__class__.__module__.startswith("github"):
+            raise
         print(f"GitHub API failed: {exc}", file=sys.stderr)
         return 1
 
