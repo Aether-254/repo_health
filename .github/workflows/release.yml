@@ -62,7 +62,7 @@ jobs:
         run: python dist/repo-health.pyz Aether-254/repo_health --timeout 15
 
       - name: Upload Shiv artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: repo-health-pyz
           path: |
@@ -156,7 +156,7 @@ jobs:
           cp "dist/${{ matrix.executable_name }}" "release/repo-health-${{ matrix.asset_name }}${suffix}"
 
       - name: Upload PyInstaller artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: repo-health-${{ matrix.asset_name }}
           path: release/*
