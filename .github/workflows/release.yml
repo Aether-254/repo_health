@@ -1,0 +1,181 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  shiv:
+    name: Build Shiv pyz
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m pip install -e .
+
+      - name: Run tests
+        run: python -m pytest
+
+      - name: Run Ruff lint
+        run: python -m ruff check .
+
+      - name: Check Ruff formatting
+        run: python -m ruff format --check .
+
+      - name: Run live public repository scan
+        env:
+          GITHUB_API_KEY: ${{ github.token }}
+        run: repo-health octocat/Hello-World --timeout 15
+
+      - name: Build Python package
+        run: python -m build
+
+      - name: Build Shiv pyz
+        run: |
+          SITE_PACKAGES="$(python -c 'import site; print(site.getsitepackages()[0])')"
+          python -m shiv \
+            --site-packages "$SITE_PACKAGES" \
+            --compressed \
+            --entry-point github_requests_cli.cli:main \
+            --output-file dist/repo-health.pyz \
+            .
+
+      - name: Test Shiv pyz
+        env:
+          GITHUB_API_KEY: ${{ github.token }}
+        run: python dist/repo-health.pyz octocat/Hello-World --timeout 15
+
+      - name: Upload Shiv artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: repo-health-pyz
+          path: |
+            dist/repo-health.pyz
+            dist/*.whl
+            dist/*.tar.gz
+
+  pyinstaller:
+    name: PyInstaller ${{ matrix.asset_name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - asset_name: arm64darwin
+            os: macos-14
+            python_architecture: arm64
+            executable_name: repo-health
+          - asset_name: amd64darwin
+            os: macos-13
+            python_architecture: x64
+            executable_name: repo-health
+          - asset_name: arm64win
+            os: windows-11-arm
+            python_architecture: arm64
+            executable_name: repo-health.exe
+          - asset_name: amd64win
+            os: windows-latest
+            python_architecture: x64
+            executable_name: repo-health.exe
+          - asset_name: x86win
+            os: windows-latest
+            python_architecture: x86
+            executable_name: repo-health.exe
+          - asset_name: amd64ubuntu
+            os: ubuntu-latest
+            python_architecture: x64
+            executable_name: repo-health
+          - asset_name: arm64ubuntu
+            os: ubuntu-24.04-arm
+            python_architecture: arm64
+            executable_name: repo-health
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: ${{ matrix.python_architecture }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m pip install -e .
+
+      - name: Run tests
+        run: python -m pytest
+
+      - name: Run Ruff lint
+        run: python -m ruff check .
+
+      - name: Check Ruff formatting
+        run: python -m ruff format --check .
+
+      - name: Run live public repository scan
+        env:
+          GITHUB_API_KEY: ${{ github.token }}
+        run: repo-health octocat/Hello-World --timeout 15
+
+      - name: Build PyInstaller binary
+        run: >
+          python -m PyInstaller
+          --onefile
+          --clean
+          --name repo-health
+          src/github_requests_cli/cli.py
+
+      - name: Rename binary
+        shell: bash
+        run: |
+          mkdir -p release
+          suffix=""
+          if [[ "${{ matrix.executable_name }}" == *.exe ]]; then
+            suffix=".exe"
+          fi
+          cp "dist/${{ matrix.executable_name }}" "release/repo-health-${{ matrix.asset_name }}${suffix}"
+
+      - name: Upload PyInstaller artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: repo-health-${{ matrix.asset_name }}
+          path: release/*
+
+  publish:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs:
+      - shiv
+      - pyinstaller
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*

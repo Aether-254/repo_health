@@ -1,0 +1,44 @@
+.DS_Store
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.nox/
+.tox/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Packaging output
+build/
+dist/
+*.egg-info/
+*.pyz
+*.bin
+*.exe
+*.app/
+*.dist/
+*.build/
+*.onefile-build/
+*.spec
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Coverage and reports
+.coverage
+coverage.xml
+htmlcov/
+
+# IDE/editor files
+.idea/
+.vscode/
+*.swp

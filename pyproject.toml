@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "github-repo-health"
+version = "0.1.0"
+description = "A small CLI that prints a clean Markdown health summary for any GitHub repository."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [
+  { name = "Project Maintainer" }
+]
+dependencies = [
+  "requests>=2.32,<3",
+  "PyGithub>=2.5,<3"
+]
+
+[project.scripts]
+repo-health = "github_requests_cli.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["dist", "build"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

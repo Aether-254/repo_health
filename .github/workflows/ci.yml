@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: Test, lint, format, live test, and Shiv build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m pip install -e .
+
+      - name: Run tests
+        run: python -m pytest
+
+      - name: Run Ruff lint
+        run: python -m ruff check .
+
+      - name: Check Ruff formatting
+        run: python -m ruff format --check .
+
+      - name: Run live public repository scan
+        env:
+          GITHUB_API_KEY: ${{ github.token }}
+        run: repo-health octocat/Hello-World --timeout 15
+
+      - name: Build Python package
+        run: python -m build
+
+      - name: Build Shiv pyz
+        run: |
+          mkdir -p dist
+          SITE_PACKAGES="$(python -c 'import site; print(site.getsitepackages()[0])')"
+          python -m shiv \
+            --site-packages "$SITE_PACKAGES" \
+            --compressed \
+            --entry-point github_requests_cli.cli:main \
+            --output-file dist/repo-health.pyz \
+            .
+
+      - name: Test Shiv pyz
+        env:
+          GITHUB_API_KEY: ${{ github.token }}
+        run: python dist/repo-health.pyz octocat/Hello-World --timeout 15
