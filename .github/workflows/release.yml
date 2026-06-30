@@ -39,9 +39,13 @@ jobs:
         run: python -m ruff format --check .
 
       - name: Run live public repository scan
+        uses: nick-fields/retry@v3
         env:
           GITHUB_API_KEY: ${{ github.token }}
-        run: repo-health Aether-254/repo_health --timeout 15
+        with:
+          max_attempts: 5
+          timeout_minutes: 2
+          command: repo-health Aether-254/repo_health --timeout 15
 
       - name: Build Python package
         run: python -m build
@@ -57,9 +61,13 @@ jobs:
             .
 
       - name: Test Shiv pyz
+        uses: nick-fields/retry@v3
         env:
           GITHUB_API_KEY: ${{ github.token }}
-        run: python dist/repo-health.pyz Aether-254/repo_health --timeout 15
+        with:
+          max_attempts: 5
+          timeout_minutes: 2
+          command: python dist/repo-health.pyz Aether-254/repo_health --timeout 15
 
       - name: Upload Shiv artifact
         uses: actions/upload-artifact@v7
@@ -133,9 +141,13 @@ jobs:
         run: python -m ruff format --check .
 
       - name: Run live public repository scan
+        uses: nick-fields/retry@v3
         env:
           GITHUB_API_KEY: ${{ github.token }}
-        run: repo-health Aether-254/repo_health --timeout 15
+        with:
+          max_attempts: 5
+          timeout_minutes: 2
+          command: repo-health Aether-254/repo_health --timeout 15
 
       - name: Build PyInstaller binary
         run: >
