@@ -90,10 +90,6 @@ jobs:
             os: macos-14
             python_architecture: arm64
             executable_name: repo-health
-          - asset_name: amd64darwin
-            os: macos-13
-            python_architecture: x64
-            executable_name: repo-health
           - asset_name: arm64win
             os: windows-11-arm
             python_architecture: arm64
