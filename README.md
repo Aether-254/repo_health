@@ -137,7 +137,7 @@ GitHub Actions includes:
 - live public repository scan
 - Python package build
 - Shiv `.pyz` build
-- CodeQL analysis
+- CodeQL default setup
 - Dependabot version updates
 - PyInstaller release binaries for:
   - `arm64darwin`
