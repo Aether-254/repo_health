@@ -37,7 +37,7 @@ jobs:
       - name: Run live public repository scan
         env:
           GITHUB_API_KEY: ${{ github.token }}
-        run: repo-health octocat/Hello-World --timeout 15
+        run: repo-health Aether-254/repo_health --timeout 15
 
       - name: Build Python package
         run: python -m build
@@ -56,4 +56,4 @@ jobs:
       - name: Test Shiv pyz
         env:
           GITHUB_API_KEY: ${{ github.token }}
-        run: python dist/repo-health.pyz octocat/Hello-World --timeout 15
+        run: python dist/repo-health.pyz Aether-254/repo_health --timeout 15
