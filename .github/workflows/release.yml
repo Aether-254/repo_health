@@ -5,6 +5,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag (e.g., v1.0.0)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -178,6 +183,16 @@ jobs:
       - pyinstaller
 
     steps:
+      - name: Get Tag
+        id: get_tag
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="${{ inputs.tag_name }}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+        
       - name: Download artifacts
         uses: actions/download-artifact@v8
         with:
@@ -188,3 +203,6 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: release/*
+          tag_name: ${{ steps.get_tag.outputs.tag }}
+          overwrite_files: true
+          token: ${{ secrets.GITHUB_TOKEN }}
