@@ -1,5 +1,5 @@
 # github-repo-health
-[![Release](https://github.com/Aether-254/repo_health/actions/workflows/release.yml/badge.svg)](https://github.com/Aether-254/repo_health/actions/workflows/release.yml) [![ci](https://github.com/Aether-254/repo_health/actions/workflows/ci.yml/badge.svg)](https://github.com/Aether-254/repo_health/actions/workflows/ci.yml)
+[![Release](https://github.com/Aether-254/repo_health/actions/workflows/release.yml/badge.svg)](https://github.com/Aether-254/repo_health/actions/workflows/release.yml) [![ci](https://github.com/Aether-254/repo_health/actions/workflows/ci.yml/badge.svg)](https://github.com/Aether-254/repo_health/actions/workflows/ci.yml)[![codecov](https://codecov.io/github/Aether-254/repo_health/graph/badge.svg)](https://codecov.io/github/Aether-254/repo_health)
 
 A small Python 3.12 CLI app that scans any GitHub repository and prints a clean health summary as Markdown.
 
