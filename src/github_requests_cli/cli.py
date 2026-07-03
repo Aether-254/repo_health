@@ -28,6 +28,7 @@ from github_requests_cli.private_scan import (
 )
 from github_requests_cli.public_scan import public_search_count, scan_public_repository
 from github_requests_cli.repositories import normalize_repository
+from github_requests_cli.rich_render import render_health
 from github_requests_cli.settings import load_dotenv, load_settings
 from github_requests_cli.time_utils import human_age, parse_github_datetime
 
@@ -54,6 +55,7 @@ __all__ = [
     "present",
     "public_search_count",
     "render_markdown",
+    "render_health",
     "scan_public_repository",
     "scan_repository",
     "total_search_count",
@@ -127,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"GitHub API failed: {exc}", file=sys.stderr)
         return 1
 
-    print(render_markdown(health))
+    render_health(health)
     return 0
 
 

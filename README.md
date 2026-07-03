@@ -1,11 +1,12 @@
 # github-repo-health
 [![Release](https://github.com/Aether-254/repo_health/actions/workflows/release.yml/badge.svg)](https://github.com/Aether-254/repo_health/actions/workflows/release.yml) [![ci](https://github.com/Aether-254/repo_health/actions/workflows/ci.yml/badge.svg)](https://github.com/Aether-254/repo_health/actions/workflows/ci.yml)[![codecov](https://codecov.io/github/Aether-254/repo_health/graph/badge.svg)](https://codecov.io/github/Aether-254/repo_health)
 
-A small Python 3.12 CLI app that scans any GitHub repository and prints a clean health summary as Markdown.
+A small Python 3.12 CLI app that scans any GitHub repository and prints a Rich terminal health summary.
 
 It reports:
 
 - archived status
+- activity status for the default branch: active, semi-active, low activity, inactive, or archived
 - latest commit age
 - open issue count
 - open pull request count
@@ -13,6 +14,8 @@ It reports:
 - license presence
 - README presence
 - GitHub Actions workflow presence
+- README, code of conduct, contributing, license, and security documents rendered as terminal Markdown
+- project descriptor summaries for files such as `pyproject.toml`, `package.json`, `go.mod`, `pom.xml`, `CMakeLists.txt`, and `Makefile`
 
 ## 环境准备
 
@@ -60,21 +63,20 @@ repo-health your-org/private-repo --private
 
 Example output:
 
-```markdown
-# Repository Health: openai/codex
-
-[View repository](https://github.com/openai/codex)
-
-| Check | Result |
-| --- | --- |
-| Archived | No |
-| Latest commit age | 3 days (2026-06-27) |
-| Open issues | 12 |
-| Open pull requests | 4 |
-| Detected language | Python |
-| License | Present (MIT License) |
-| README | Present |
-| CI workflow | Present |
+```text
+Repository Health: openai/codex
+Check                Result
+Repository           https://github.com/openai/codex
+Status               Active
+Archived             No
+Default branch       main
+Latest commit age    3 days (2026-06-27)
+Open issues          12
+Open pull requests   4
+Detected language    Python
+License              MIT
+README               Present
+CI workflow          Present
 ```
 
 ## 开发

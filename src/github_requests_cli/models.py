@@ -14,10 +14,26 @@ class Settings:
 
 
 @dataclass(frozen=True)
+class RepositoryDocument:
+    name: str
+    path: str
+    markdown: str
+
+
+@dataclass(frozen=True)
+class DescriptorSummary:
+    path: str
+    kind: str
+    summary: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class RepoHealth:
     full_name: str
     html_url: str
     archived: bool
+    status: str
+    default_branch: str
     latest_commit_age: str
     latest_commit_date: datetime | None
     open_issue_count: int
@@ -25,8 +41,11 @@ class RepoHealth:
     detected_language: str | None
     license_present: bool
     license_name: str | None
+    license_key: str | None
     readme_present: bool
     ci_workflow_present: bool
+    documents: tuple[RepositoryDocument, ...] = ()
+    descriptors: tuple[DescriptorSummary, ...] = ()
 
 
 class GithubClient(Protocol):

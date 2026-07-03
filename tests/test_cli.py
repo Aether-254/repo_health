@@ -1,3 +1,4 @@
+import base64
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -21,6 +22,12 @@ from github_requests_cli.cli import (
     render_markdown,
     scan_public_repository,
 )
+from github_requests_cli.status import repository_status
+
+
+def encoded(value: str) -> dict[str, str]:
+    content = base64.b64encode(value.encode("utf-8")).decode("ascii")
+    return {"content": content, "encoding": "base64"}
 
 
 class UnknownObjectException(Exception):
@@ -90,6 +97,28 @@ def test_human_age_formats_days() -> None:
     assert human_age(now - timedelta(days=12), now=now) == "12 days"
 
 
+def test_repository_status_uses_default_branch_commit_age() -> None:
+    now = datetime(2026, 6, 30, tzinfo=UTC)
+
+    assert repository_status(archived=True, latest_commit_date=now, now=now) == "Archived"
+    assert (
+        repository_status(archived=False, latest_commit_date=now - timedelta(days=60), now=now)
+        == "Active"
+    )
+    assert (
+        repository_status(archived=False, latest_commit_date=now - timedelta(days=120), now=now)
+        == "Semi-active"
+    )
+    assert (
+        repository_status(archived=False, latest_commit_date=now - timedelta(days=180), now=now)
+        == "Low activity"
+    )
+    assert (
+        repository_status(archived=False, latest_commit_date=now - timedelta(days=365), now=now)
+        == "Inactive"
+    )
+
+
 def test_parse_github_datetime() -> None:
     assert parse_github_datetime("2026-06-30T10:15:00Z") == datetime(
         2026, 6, 30, 10, 15, tzinfo=UTC
@@ -131,6 +160,8 @@ def test_render_markdown_includes_required_health_fields() -> None:
             full_name="openai/codex",
             html_url="https://github.com/openai/codex",
             archived=False,
+            status="Active",
+            default_branch="main",
             latest_commit_age="3 days",
             latest_commit_date=datetime(2026, 6, 27, tzinfo=UTC),
             open_issue_count=12,
@@ -138,16 +169,20 @@ def test_render_markdown_includes_required_health_fields() -> None:
             detected_language="Python",
             license_present=True,
             license_name="MIT License",
+            license_key="MIT",
             readme_present=True,
             ci_workflow_present=False,
         )
     )
 
-    assert "| Archived | No |" in markdown
-    assert "| Latest commit age | 3 days (2026-06-27) |" in markdown
-    assert "| Open issues | 12 |" in markdown
-    assert "| Open pull requests | 4 |" in markdown
-    assert "| CI workflow | Missing |" in markdown
+    assert "Status: Active" in markdown
+    assert "Archived: No" in markdown
+    assert "Default branch: main" in markdown
+    assert "Latest commit age: 3 days (2026-06-27)" in markdown
+    assert "Open issues: 12" in markdown
+    assert "Open pull requests: 4" in markdown
+    assert "License: MIT" in markdown
+    assert "| Check | Result |" not in markdown
 
 
 def test_scan_public_repository_uses_rest_api(monkeypatch) -> None:
@@ -159,6 +194,7 @@ def test_scan_public_repository_uses_rest_api(monkeypatch) -> None:
                     "html_url": "https://github.com/openai/codex",
                     "archived": False,
                     "language": "Python",
+                    "default_branch": "main",
                 }
             ),
             FakeResponse(
@@ -172,10 +208,35 @@ def test_scan_public_repository_uses_rest_api(monkeypatch) -> None:
                     }
                 ]
             ),
-            FakeResponse({"license": {"name": "MIT License"}}),
+            FakeResponse({"license": {"name": "MIT License", "spdx_id": "MIT"}}),
+            FakeResponse(encoded("# Codex\n")),
+            FakeResponse({"message": "Not Found"}, status_code=404),
+            FakeResponse({"message": "Not Found"}, status_code=404),
+            FakeResponse({"message": "Not Found"}, status_code=404),
+            FakeResponse(encoded("# Contributing\n")),
+            FakeResponse(encoded("MIT License\n")),
+            FakeResponse(encoded("# Security\n")),
+            FakeResponse(
+                [
+                    {"type": "file", "name": "pyproject.toml"},
+                    {"type": "file", "name": "notes.txt"},
+                ]
+            ),
+            FakeResponse(
+                encoded(
+                    "\n".join(
+                        [
+                            "[project]",
+                            'name = "github-repo-health"',
+                            'version = "0.1.0"',
+                            'requires-python = ">=3.12"',
+                            'dependencies = ["requests>=2.32,<3"]',
+                        ]
+                    )
+                )
+            ),
             FakeResponse({"total_count": 7}),
             FakeResponse({"total_count": 2}),
-            FakeResponse({"name": "README.md"}),
             FakeResponse(
                 [
                     {"type": "file", "name": "ci.yml"},
@@ -192,6 +253,8 @@ def test_scan_public_repository_uses_rest_api(monkeypatch) -> None:
         full_name="openai/codex",
         html_url="https://github.com/openai/codex",
         archived=False,
+        status="Active",
+        default_branch="main",
         latest_commit_age=human_age(datetime(2026, 6, 30, 10, 15, tzinfo=UTC)),
         latest_commit_date=datetime(2026, 6, 30, 10, 15, tzinfo=UTC),
         open_issue_count=7,
@@ -199,12 +262,27 @@ def test_scan_public_repository_uses_rest_api(monkeypatch) -> None:
         detected_language="Python",
         license_present=True,
         license_name="MIT License",
+        license_key="MIT",
         readme_present=True,
         ci_workflow_present=True,
+        documents=health.documents,
+        descriptors=health.descriptors,
     )
     assert session.headers["Authorization"] == "Bearer ghp_test"
     assert session.calls[0] == ("https://api.github.com/repos/openai/codex", {"timeout": 3})
-    assert session.calls[3][1]["params"] == {
+    assert (
+        session.calls[1][0]
+        == "https://api.github.com/repos/openai/codex/commits?sha=main&per_page=1"
+    )
+    assert [document.name for document in health.documents] == [
+        "README",
+        "Contributing",
+        "License",
+        "Security",
+    ]
+    assert health.descriptors[0].path == "pyproject.toml"
+    assert "name: github-repo-health" in health.descriptors[0].summary
+    assert session.calls[-3][1]["params"] == {
         "q": "repo:openai/codex is:issue is:open",
         "per_page": 1,
     }
@@ -386,6 +464,8 @@ def test_main_falls_back_to_private_scan_when_public_scan_fails_with_token(
         full_name="private/repo",
         html_url="https://github.com/private/repo",
         archived=False,
+        status="Inactive",
+        default_branch="main",
         latest_commit_age="No commits found",
         latest_commit_date=None,
         open_issue_count=0,
@@ -393,6 +473,7 @@ def test_main_falls_back_to_private_scan_when_public_scan_fails_with_token(
         detected_language=None,
         license_present=False,
         license_name=None,
+        license_key=None,
         readme_present=False,
         ci_workflow_present=False,
     )
@@ -418,7 +499,8 @@ def test_main_falls_back_to_private_scan_when_public_scan_fails_with_token(
     assert main(["private/repo"]) == 0
 
     captured = capsys.readouterr()
-    assert "# Repository Health: private/repo" in captured.out
+    assert "Repository Health: private/repo" in captured.out
+    assert "| Check | Result |" not in captured.out
 
 
 def test_main_reports_request_exception(monkeypatch, capsys) -> None:

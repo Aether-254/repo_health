@@ -13,7 +13,8 @@ authors = [
   { name = "Project Maintainer" }
 ]
 dependencies = [
-  "requests>=2.32,<3"
+  "requests>=2.32,<3",
+  "rich>=14.0,<15"
 ]
 
 [project.optional-dependencies]
