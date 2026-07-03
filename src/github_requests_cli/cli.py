@@ -8,85 +8,56 @@
 from __future__ import annotations
 
 import argparse
-import os
-import re
 import sys
-from dataclasses import dataclass
-from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any, Protocol, cast
 
 import requests
 
-REPOSITORY_RE = re.compile(
-    r"^(?:https?://github\.com/)?(?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+?)(?:\.git)?/?$"
+from github_requests_cli.errors import GitHubApiError, PublicRepositoryNotFoundError
+from github_requests_cli.github_api import api_get_json, api_get_optional_json
+from github_requests_cli.markdown import present, render_markdown
+from github_requests_cli.models import GithubClient, RepoHealth, Settings
+from github_requests_cli.private_scan import (
+    github_client,
+    has_ci_workflow,
+    has_readme,
+    is_github_not_found,
+    latest_commit_datetime,
+    license_info,
+    scan_repository,
+    total_search_count,
 )
+from github_requests_cli.public_scan import public_search_count, scan_public_repository
+from github_requests_cli.repositories import normalize_repository
+from github_requests_cli.settings import load_dotenv, load_settings
+from github_requests_cli.time_utils import human_age, parse_github_datetime
 
-
-@dataclass(frozen=True)
-class Settings:
-    github_api_key: str | None
-    request_timeout_seconds: float
-
-
-@dataclass(frozen=True)
-class RepoHealth:
-    full_name: str
-    html_url: str
-    archived: bool
-    latest_commit_age: str
-    latest_commit_date: datetime | None
-    open_issue_count: int
-    open_pr_count: int
-    detected_language: str | None
-    license_present: bool
-    license_name: str | None
-    readme_present: bool
-    ci_workflow_present: bool
-
-
-class GithubClient(Protocol):
-    def get_repo(self, full_name_or_id: str): ...
-
-    def search_issues(self, query: str): ...
-
-
-class PublicRepositoryNotFoundError(RuntimeError):
-    """Public REST API cannot read the repository."""
-
-
-class GitHubApiError(RuntimeError):
-    """GitHub REST API returned a known user-facing failure."""
-
-
-def load_dotenv(path: Path = Path(".env")) -> None:
-    if not path.exists():
-        return
-
-    for line in path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-
-        key, value = stripped.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        os.environ.setdefault(key, value)
-
-
-def load_settings() -> Settings:
-    load_dotenv()
-
-    timeout = os.getenv("REQUEST_TIMEOUT_SECONDS", "20")
-    try:
-        request_timeout_seconds = float(timeout)
-    except ValueError:
-        request_timeout_seconds = 20.0
-
-    return Settings(
-        github_api_key=os.getenv("GITHUB_API_KEY") or os.getenv("GITHUB_TOKEN"),
-        request_timeout_seconds=request_timeout_seconds,
-    )
+__all__ = [
+    "GitHubApiError",
+    "GithubClient",
+    "PublicRepositoryNotFoundError",
+    "RepoHealth",
+    "Settings",
+    "api_get_json",
+    "api_get_optional_json",
+    "github_client",
+    "has_ci_workflow",
+    "has_readme",
+    "human_age",
+    "is_github_not_found",
+    "latest_commit_datetime",
+    "license_info",
+    "load_dotenv",
+    "load_settings",
+    "main",
+    "normalize_repository",
+    "parse_github_datetime",
+    "present",
+    "public_search_count",
+    "render_markdown",
+    "scan_public_repository",
+    "scan_repository",
+    "total_search_count",
+]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -115,345 +86,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="HTTP timeout in seconds for API sanity checks. Defaults to REQUEST_TIMEOUT_SECONDS.",
     )
     return parser
-
-
-def normalize_repository(value: str) -> str:
-    match = REPOSITORY_RE.match(value.strip())
-    if not match:
-        raise ValueError("Repository must be in owner/name form or a github.com repository URL.")
-    return f"{match.group('owner')}/{match.group('repo')}"
-
-
-def github_client(token: str | None) -> GithubClient:
-    if not token:
-        raise ValueError("Private repository scans require GITHUB_API_KEY in .env or --token.")
-    try:
-        from github import Github  # type: ignore[import-not-found]
-    except ImportError as exc:
-        raise ValueError(
-            "Private repository scans require PyGithub. Install with `pip install -e .[private]`."
-        ) from exc
-    return cast(GithubClient, Github(token))
-
-
-def github_headers(token: str | None = None) -> dict[str, str]:
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    return headers
-
-
-def response_message(response: requests.Response) -> str:
-    try:
-        payload = response.json()
-    except ValueError:
-        return ""
-    if isinstance(payload, dict):
-        return str(payload.get("message") or "")
-    return ""
-
-
-def raise_for_github_status(response: requests.Response) -> None:
-    if response.status_code == 404:
-        raise PublicRepositoryNotFoundError("Repository is not public or does not exist.")
-    if response.status_code == 401:
-        raise GitHubApiError("GitHub API authentication failed. Check --token or GITHUB_API_KEY.")
-    if response.status_code == 403:
-        message = response_message(response).lower()
-        remaining = response.headers.get("X-RateLimit-Remaining")
-        if remaining == "0" or "rate limit" in message:
-            raise GitHubApiError("GitHub API rate limit exceeded. Retry later or pass --token.")
-        raise GitHubApiError("GitHub API access forbidden. Check repository access or token scope.")
-    if response.status_code == 422:
-        raise GitHubApiError("GitHub API rejected the search query for this repository.")
-    if response.status_code >= 500:
-        raise GitHubApiError(f"GitHub API server error ({response.status_code}). Try again later.")
-
-    response.raise_for_status()
-
-
-def response_json(response: requests.Response) -> Any:
-    try:
-        return response.json()
-    except ValueError as exc:
-        raise GitHubApiError("GitHub API returned malformed JSON.") from exc
-
-
-def api_get_json(session: requests.Session, url: str, *, timeout: float):
-    response = session.get(url, timeout=timeout)
-    raise_for_github_status(response)
-    return response_json(response)
-
-
-def api_get_optional_json(session: requests.Session, url: str, *, timeout: float):
-    response = session.get(url, timeout=timeout)
-    if response.status_code == 404:
-        return None
-    raise_for_github_status(response)
-    return response_json(response)
-
-
-def total_search_count(client: GithubClient, query: str) -> int:
-    return int(client.search_issues(query).totalCount)
-
-
-def latest_commit_datetime(repo) -> datetime | None:
-    commits = repo.get_commits()
-    if commits.totalCount == 0:
-        return None
-
-    value = commits[0].commit.author.date
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
-
-
-def human_age(since: datetime | None, *, now: datetime | None = None) -> str:
-    if since is None:
-        return "No commits found"
-
-    now = now or datetime.now(UTC)
-    delta = now - since
-    days = max(delta.days, 0)
-
-    if days == 0:
-        hours = max(delta.seconds // 3600, 0)
-        if hours == 0:
-            return "Less than 1 hour"
-        if hours == 1:
-            return "1 hour"
-        return f"{hours} hours"
-
-    if days == 1:
-        return "1 day"
-    if days < 30:
-        return f"{days} days"
-    if days < 365:
-        months = days // 30
-        return "1 month" if months == 1 else f"{months} months"
-
-    years = days // 365
-    return "1 year" if years == 1 else f"{years} years"
-
-
-def has_readme(repo) -> bool:
-    try:
-        repo.get_readme()
-    except Exception as exc:
-        if not is_github_not_found(exc):
-            raise
-        return False
-    return True
-
-
-def has_ci_workflow(repo) -> bool:
-    try:
-        workflows = repo.get_contents(".github/workflows")
-    except Exception as exc:
-        if not is_github_not_found(exc):
-            raise
-        return False
-
-    if not isinstance(workflows, list):
-        workflows = [workflows]
-
-    return any(item.type == "file" and item.name.endswith((".yml", ".yaml")) for item in workflows)
-
-
-def license_info(repo) -> tuple[bool, str | None]:
-    try:
-        license_file = repo.get_license()
-    except Exception as exc:
-        if not is_github_not_found(exc):
-            raise
-        return False, None
-
-    license_name = None
-    if getattr(license_file, "license", None):
-        license_name = getattr(license_file.license, "name", None)
-
-    return True, license_name
-
-
-def is_github_not_found(exc: Exception) -> bool:
-    status = getattr(exc, "status", None)
-    if status == 404:
-        return True
-    return exc.__class__.__name__ == "UnknownObjectException"
-
-
-def scan_repository(client: GithubClient, repository: str) -> RepoHealth:
-    repo = client.get_repo(repository)
-    latest_commit_date = latest_commit_datetime(repo)
-    license_present, license_name = license_info(repo)
-
-    return RepoHealth(
-        full_name=repo.full_name,
-        html_url=repo.html_url,
-        archived=bool(repo.archived),
-        latest_commit_age=human_age(latest_commit_date),
-        latest_commit_date=latest_commit_date,
-        open_issue_count=total_search_count(client, f"repo:{repo.full_name} is:issue is:open"),
-        open_pr_count=total_search_count(client, f"repo:{repo.full_name} is:pr is:open"),
-        detected_language=repo.language,
-        license_present=license_present,
-        license_name=license_name,
-        readme_present=has_readme(repo),
-        ci_workflow_present=has_ci_workflow(repo),
-    )
-
-
-def parse_github_datetime(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
-
-
-def public_search_count(session: requests.Session, query: str, *, timeout: float) -> int:
-    params: dict[str, str | int] = {"q": query, "per_page": 1}
-    response = session.get(
-        "https://api.github.com/search/issues",
-        params=params,
-        timeout=timeout,
-    )
-    raise_for_github_status(response)
-    try:
-        return int(response_json(response)["total_count"])
-    except (KeyError, TypeError, ValueError) as exc:
-        raise GitHubApiError("GitHub API response did not include a valid search count.") from exc
-
-
-def public_readme_present(session: requests.Session, repository: str, *, timeout: float) -> bool:
-    payload = api_get_optional_json(
-        session,
-        f"https://api.github.com/repos/{repository}/readme",
-        timeout=timeout,
-    )
-    return payload is not None
-
-
-def public_ci_workflow_present(
-    session: requests.Session, repository: str, *, timeout: float
-) -> bool:
-    payload = api_get_optional_json(
-        session,
-        f"https://api.github.com/repos/{repository}/contents/.github/workflows",
-        timeout=timeout,
-    )
-    if payload is None:
-        return False
-    if isinstance(payload, dict):
-        payload = [payload]
-    return any(
-        item.get("type") == "file" and item.get("name", "").endswith((".yml", ".yaml"))
-        for item in payload
-    )
-
-
-def public_license_info(
-    session: requests.Session, repository: str, *, timeout: float
-) -> tuple[bool, str | None]:
-    payload = api_get_optional_json(
-        session,
-        f"https://api.github.com/repos/{repository}/license",
-        timeout=timeout,
-    )
-    if payload is None:
-        return False, None
-
-    license_payload = payload.get("license") or {}
-    return True, license_payload.get("name")
-
-
-def scan_public_repository(
-    repository: str, *, timeout: float, token: str | None = None
-) -> RepoHealth:
-    with requests.Session() as session:
-        session.headers.update(github_headers(token))
-        repo = api_get_json(
-            session,
-            f"https://api.github.com/repos/{repository}",
-            timeout=timeout,
-        )
-        commits = api_get_optional_json(
-            session,
-            f"https://api.github.com/repos/{repository}/commits?per_page=1",
-            timeout=timeout,
-        )
-        latest_commit_date = None
-        if commits:
-            latest_commit_date = parse_github_datetime(
-                commits[0].get("commit", {}).get("committer", {}).get("date")
-            )
-
-        license_present, license_name = public_license_info(session, repository, timeout=timeout)
-
-        try:
-            return RepoHealth(
-                full_name=repo["full_name"],
-                html_url=repo["html_url"],
-                archived=bool(repo["archived"]),
-                latest_commit_age=human_age(latest_commit_date),
-                latest_commit_date=latest_commit_date,
-                open_issue_count=public_search_count(
-                    session, f"repo:{repo['full_name']} is:issue is:open", timeout=timeout
-                ),
-                open_pr_count=public_search_count(
-                    session, f"repo:{repo['full_name']} is:pr is:open", timeout=timeout
-                ),
-                detected_language=repo.get("language"),
-                license_present=license_present,
-                license_name=license_name,
-                readme_present=public_readme_present(session, repository, timeout=timeout),
-                ci_workflow_present=public_ci_workflow_present(
-                    session, repository, timeout=timeout
-                ),
-            )
-        except (KeyError, TypeError) as exc:
-            raise GitHubApiError(
-                "GitHub API response did not include expected repository fields."
-            ) from exc
-
-
-def present(value: bool) -> str:
-    return "Present" if value else "Missing"
-
-
-def render_markdown(health: RepoHealth) -> str:
-    latest_commit = health.latest_commit_age
-    if health.latest_commit_date is not None:
-        latest_commit = (
-            f"{health.latest_commit_age} ({health.latest_commit_date.date().isoformat()})"
-        )
-
-    license_value = "Present"
-    if health.license_name:
-        license_value = f"Present ({health.license_name})"
-    elif not health.license_present:
-        license_value = "Missing"
-
-    return "\n".join(
-        [
-            f"# Repository Health: {health.full_name}",
-            "",
-            f"[View repository]({health.html_url})",
-            "",
-            "| Check | Result |",
-            "| --- | --- |",
-            f"| Archived | {'Yes' if health.archived else 'No'} |",
-            f"| Latest commit age | {latest_commit} |",
-            f"| Open issues | {health.open_issue_count} |",
-            f"| Open pull requests | {health.open_pr_count} |",
-            f"| Detected language | {health.detected_language or 'Unknown'} |",
-            f"| License | {license_value} |",
-            f"| README | {present(health.readme_present)} |",
-            f"| CI workflow | {present(health.ci_workflow_present)} |",
-            "",
-        ]
-    )
 
 
 def main(argv: list[str] | None = None) -> int:
