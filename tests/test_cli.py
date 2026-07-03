@@ -85,6 +85,10 @@ def test_normalize_repository_accepts_github_url() -> None:
     assert normalize_repository("https://github.com/openai/codex.git") == "openai/codex"
 
 
+def test_normalize_repository_accepts_github_url_without_protocol() -> None:
+    assert normalize_repository("github.com/openai/codex") == "openai/codex"
+
+
 def test_human_age_formats_days() -> None:
     now = datetime(2026, 6, 30, tzinfo=UTC)
     assert human_age(now - timedelta(days=12), now=now) == "12 days"
