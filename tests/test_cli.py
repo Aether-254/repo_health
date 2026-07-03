@@ -1,12 +1,15 @@
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+import pytest
 import requests
 
 from github_requests_cli.cli import (
+    GitHubApiError,
     PublicRepositoryNotFoundError,
     RepoHealth,
     api_get_json,
+    api_get_optional_json,
     github_client,
     has_ci_workflow,
     human_age,
@@ -39,11 +42,14 @@ class FakeRepo:
 
 
 class FakeResponse:
-    def __init__(self, payload, *, status_code=200):
+    def __init__(self, payload, *, status_code=200, headers=None):
         self.payload = payload
         self.status_code = status_code
+        self.headers = headers or {}
 
     def json(self):
+        if isinstance(self.payload, Exception):
+            raise self.payload
         return self.payload
 
     def raise_for_status(self):
@@ -204,6 +210,14 @@ def test_scan_public_repository_uses_rest_api(monkeypatch) -> None:
     }
 
 
+def test_api_get_json_returns_payload() -> None:
+    session = FakeSession([FakeResponse({"full_name": "openai/codex"})])
+
+    assert api_get_json(session, "https://api.github.com/repos/openai/codex", timeout=3) == {
+        "full_name": "openai/codex"
+    }
+
+
 def test_api_get_json_raises_public_not_found_on_404() -> None:
     session = FakeSession([FakeResponse({"message": "Not Found"}, status_code=404)])
 
@@ -215,6 +229,98 @@ def test_api_get_json_raises_public_not_found_on_404() -> None:
         raise AssertionError("Expected public repository lookup to fail")
 
 
+@pytest.mark.parametrize(
+    ("status_code", "payload", "headers", "expected_message"),
+    [
+        (
+            401,
+            {"message": "Bad credentials"},
+            {},
+            "authentication failed",
+        ),
+        (
+            403,
+            {"message": "API rate limit exceeded"},
+            {"X-RateLimit-Remaining": "0"},
+            "rate limit exceeded",
+        ),
+        (
+            403,
+            {"message": "Resource not accessible by integration"},
+            {},
+            "access forbidden",
+        ),
+        (
+            422,
+            {"message": "Validation Failed"},
+            {},
+            "rejected the search query",
+        ),
+        (
+            500,
+            {"message": "Server Error"},
+            {},
+            r"server error \(500\)",
+        ),
+    ],
+)
+def test_api_get_json_reports_github_api_errors(
+    status_code, payload, headers, expected_message
+) -> None:
+    session = FakeSession([FakeResponse(payload, status_code=status_code, headers=headers)])
+
+    with pytest.raises(GitHubApiError, match=expected_message):
+        api_get_json(session, "https://api.github.com/repos/openai/codex", timeout=3)
+
+
+def test_api_get_json_reports_malformed_json() -> None:
+    session = FakeSession([FakeResponse(ValueError("bad json"))])
+
+    with pytest.raises(GitHubApiError, match="malformed JSON"):
+        api_get_json(session, "https://api.github.com/repos/openai/codex", timeout=3)
+
+
+def test_api_get_optional_json_returns_none_on_404() -> None:
+    session = FakeSession([FakeResponse({"message": "Not Found"}, status_code=404)])
+
+    assert (
+        api_get_optional_json(
+            session,
+            "https://api.github.com/repos/openai/codex/readme",
+            timeout=3,
+        )
+        is None
+    )
+
+
+def test_api_get_optional_json_reports_500() -> None:
+    session = FakeSession([FakeResponse({"message": "Server Error"}, status_code=500)])
+
+    with pytest.raises(GitHubApiError, match="server error"):
+        api_get_optional_json(
+            session,
+            "https://api.github.com/repos/openai/codex/readme",
+            timeout=3,
+        )
+
+
+def test_api_get_optional_json_propagates_timeout() -> None:
+    session = FakeSession([requests.Timeout("timed out")])
+
+    with pytest.raises(requests.Timeout):
+        api_get_optional_json(
+            session,
+            "https://api.github.com/repos/openai/codex/readme",
+            timeout=3,
+        )
+
+
+def test_public_search_count_returns_total_count() -> None:
+    session = FakeSession([FakeResponse({"total_count": 42})])
+
+    assert public_search_count(session, "repo:openai/codex is:issue is:open", timeout=3) == 42
+
+
 def test_public_search_count_raises_public_not_found_on_404() -> None:
     session = FakeSession([FakeResponse({"message": "Not Found"}, status_code=404)])
 
@@ -224,6 +330,32 @@ def test_public_search_count_raises_public_not_found_on_404() -> None:
         assert "not public" in str(exc)
     else:
         raise AssertionError("Expected public search lookup to fail")
+
+
+def test_public_search_count_reports_malformed_count() -> None:
+    session = FakeSession([FakeResponse({"items": []})])
+
+    with pytest.raises(GitHubApiError, match="valid search count"):
+        public_search_count(session, "repo:openai/codex is:issue is:open", timeout=3)
+
+
+def test_scan_public_repository_reports_malformed_repo_payload(monkeypatch) -> None:
+    session = FakeSession(
+        [
+            FakeResponse(
+                {
+                    "html_url": "https://github.com/openai/codex",
+                    "archived": False,
+                }
+            ),
+            FakeResponse([]),
+            FakeResponse({"license": {"name": "MIT License"}}),
+        ]
+    )
+    monkeypatch.setattr("github_requests_cli.cli.requests.Session", lambda: session)
+
+    with pytest.raises(GitHubApiError, match="expected repository fields"):
+        scan_public_repository("openai/codex", timeout=3)
 
 
 def test_main_reports_public_not_found_without_token(monkeypatch, capsys) -> None:
@@ -308,3 +440,25 @@ def test_main_reports_request_exception(monkeypatch, capsys) -> None:
 
     captured = capsys.readouterr()
     assert "GitHub API is not reachable" in captured.err
+    assert "increasing --timeout" in captured.err
+
+
+def test_main_reports_rate_limit(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        "github_requests_cli.cli.load_settings",
+        lambda: SimpleNamespace(
+            github_api_key=None,
+            request_timeout_seconds=3,
+        ),
+    )
+    monkeypatch.setattr(
+        "github_requests_cli.cli.scan_public_repository",
+        lambda repository, *, timeout, token=None: (_ for _ in ()).throw(
+            GitHubApiError("GitHub API rate limit exceeded. Retry later or pass --token.")
+        ),
+    )
+
+    assert main(["openai/codex"]) == 1
+
+    captured = capsys.readouterr()
+    assert "rate limit exceeded" in captured.err

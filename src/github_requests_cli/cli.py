@@ -55,6 +55,10 @@ class PublicRepositoryNotFoundError(RuntimeError):
     """Public REST API cannot read the repository."""
 
 
+class GitHubApiError(RuntimeError):
+    """GitHub REST API returned a known user-facing failure."""
+
+
 def load_dotenv(path: Path = Path(".env")) -> None:
     if not path.exists():
         return
@@ -142,20 +146,54 @@ def github_headers(token: str | None = None) -> dict[str, str]:
     return headers
 
 
-def api_get_json(session: requests.Session, url: str, *, timeout: float):
-    response = session.get(url, timeout=timeout)
+def response_message(response: requests.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return ""
+    if isinstance(payload, dict):
+        return str(payload.get("message") or "")
+    return ""
+
+
+def raise_for_github_status(response: requests.Response) -> None:
     if response.status_code == 404:
         raise PublicRepositoryNotFoundError("Repository is not public or does not exist.")
+    if response.status_code == 401:
+        raise GitHubApiError("GitHub API authentication failed. Check --token or GITHUB_API_KEY.")
+    if response.status_code == 403:
+        message = response_message(response).lower()
+        remaining = response.headers.get("X-RateLimit-Remaining")
+        if remaining == "0" or "rate limit" in message:
+            raise GitHubApiError("GitHub API rate limit exceeded. Retry later or pass --token.")
+        raise GitHubApiError("GitHub API access forbidden. Check repository access or token scope.")
+    if response.status_code == 422:
+        raise GitHubApiError("GitHub API rejected the search query for this repository.")
+    if response.status_code >= 500:
+        raise GitHubApiError(f"GitHub API server error ({response.status_code}). Try again later.")
+
     response.raise_for_status()
-    return response.json()
+
+
+def response_json(response: requests.Response):
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise GitHubApiError("GitHub API returned malformed JSON.") from exc
+
+
+def api_get_json(session: requests.Session, url: str, *, timeout: float):
+    response = session.get(url, timeout=timeout)
+    raise_for_github_status(response)
+    return response_json(response)
 
 
 def api_get_optional_json(session: requests.Session, url: str, *, timeout: float):
     response = session.get(url, timeout=timeout)
     if response.status_code == 404:
         return None
-    response.raise_for_status()
-    return response.json()
+    raise_for_github_status(response)
+    return response_json(response)
 
 
 def total_search_count(client: GithubClient, query: str) -> int:
@@ -280,10 +318,11 @@ def public_search_count(session: requests.Session, query: str, *, timeout: float
         params={"q": query, "per_page": 1},
         timeout=timeout,
     )
-    if response.status_code == 404:
-        raise PublicRepositoryNotFoundError("Repository is not public or does not exist.")
-    response.raise_for_status()
-    return int(response.json()["total_count"])
+    raise_for_github_status(response)
+    try:
+        return int(response_json(response)["total_count"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise GitHubApiError("GitHub API response did not include a valid search count.") from exc
 
 
 def public_readme_present(session: requests.Session, repository: str, *, timeout: float) -> bool:
@@ -351,24 +390,31 @@ def scan_public_repository(
 
         license_present, license_name = public_license_info(session, repository, timeout=timeout)
 
-        return RepoHealth(
-            full_name=repo["full_name"],
-            html_url=repo["html_url"],
-            archived=bool(repo["archived"]),
-            latest_commit_age=human_age(latest_commit_date),
-            latest_commit_date=latest_commit_date,
-            open_issue_count=public_search_count(
-                session, f"repo:{repo['full_name']} is:issue is:open", timeout=timeout
-            ),
-            open_pr_count=public_search_count(
-                session, f"repo:{repo['full_name']} is:pr is:open", timeout=timeout
-            ),
-            detected_language=repo.get("language"),
-            license_present=license_present,
-            license_name=license_name,
-            readme_present=public_readme_present(session, repository, timeout=timeout),
-            ci_workflow_present=public_ci_workflow_present(session, repository, timeout=timeout),
-        )
+        try:
+            return RepoHealth(
+                full_name=repo["full_name"],
+                html_url=repo["html_url"],
+                archived=bool(repo["archived"]),
+                latest_commit_age=human_age(latest_commit_date),
+                latest_commit_date=latest_commit_date,
+                open_issue_count=public_search_count(
+                    session, f"repo:{repo['full_name']} is:issue is:open", timeout=timeout
+                ),
+                open_pr_count=public_search_count(
+                    session, f"repo:{repo['full_name']} is:pr is:open", timeout=timeout
+                ),
+                detected_language=repo.get("language"),
+                license_present=license_present,
+                license_name=license_name,
+                readme_present=public_readme_present(session, repository, timeout=timeout),
+                ci_workflow_present=public_ci_workflow_present(
+                    session, repository, timeout=timeout
+                ),
+            )
+        except (KeyError, TypeError) as exc:
+            raise GitHubApiError(
+                "GitHub API response did not include expected repository fields."
+            ) from exc
 
 
 def present(value: bool) -> str:
@@ -436,8 +482,11 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
+    except GitHubApiError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     except requests.RequestException as exc:
-        print(f"GitHub API is not reachable: {exc}", file=sys.stderr)
+        print(f"GitHub API is not reachable: {exc}. Try increasing --timeout.", file=sys.stderr)
         return 1
     except Exception as exc:
         if not exc.__class__.__module__.startswith("github"):

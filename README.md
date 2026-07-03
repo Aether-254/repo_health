@@ -149,6 +149,19 @@ GitHub Actions includes:
   - `arm64ubuntu`
 
 Pushing a tag matching `v*` publishes the generated artifacts to GitHub Releases.
+Each release includes a `SHA256SUMS` file for artifact verification.
+
+Verify a downloaded release artifact:
+
+```bash
+sha256sum -c SHA256SUMS
+```
+
+On macOS, if `sha256sum` is not installed:
+
+```bash
+shasum -a 256 -c SHA256SUMS
+```
 
 ## 文件说明
 
@@ -157,3 +170,6 @@ Pushing a tag matching `v*` publishes the generated artifacts to GitHub Releases
 - `pyproject.toml`：项目元数据、命令行入口、测试和 Nuitka 配置。
 - `.gitignore`：忽略虚拟环境、缓存、构建产物和本地密钥。
 - `.env.example`：本地环境变量模板。
+- `CONTRIBUTING.md`：本地开发和 PR 检查流程。
+- `CHANGELOG.md`：版本变更记录。
+- `CODE_OF_CONDUCT.md`：项目协作行为规范。
