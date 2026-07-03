@@ -20,6 +20,10 @@ dependencies = [
 private = [
   "PyGithub>=2.5,<3"
 ]
+test = [
+  "pytest>=9.1.1,<10",
+  "pytest-cov>=5.0.0,<7"
+]
 
 [project.scripts]
 repo-health = "github_requests_cli.cli:main"
