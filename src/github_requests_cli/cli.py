@@ -14,7 +14,7 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol, cast
 
 import requests
 
@@ -124,16 +124,16 @@ def normalize_repository(value: str) -> str:
     return f"{match.group('owner')}/{match.group('repo')}"
 
 
-def github_client(token: str | None) -> object:
+def github_client(token: str | None) -> GithubClient:
     if not token:
         raise ValueError("Private repository scans require GITHUB_API_KEY in .env or --token.")
     try:
-        from github import Github
+        from github import Github  # type: ignore[import-not-found]
     except ImportError as exc:
         raise ValueError(
             "Private repository scans require PyGithub. Install with `pip install -e .[private]`."
         ) from exc
-    return Github(token)
+    return cast(GithubClient, Github(token))
 
 
 def github_headers(token: str | None = None) -> dict[str, str]:
@@ -175,7 +175,7 @@ def raise_for_github_status(response: requests.Response) -> None:
     response.raise_for_status()
 
 
-def response_json(response: requests.Response):
+def response_json(response: requests.Response) -> Any:
     try:
         return response.json()
     except ValueError as exc:
@@ -313,9 +313,10 @@ def parse_github_datetime(value: str | None) -> datetime | None:
 
 
 def public_search_count(session: requests.Session, query: str, *, timeout: float) -> int:
+    params: dict[str, str | int] = {"q": query, "per_page": 1}
     response = session.get(
         "https://api.github.com/search/issues",
-        params={"q": query, "per_page": 1},
+        params=params,
         timeout=timeout,
     )
     raise_for_github_status(response)

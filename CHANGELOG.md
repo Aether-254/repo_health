@@ -8,3 +8,4 @@ All notable changes to this project will be documented in this file.
 - Added GitHub API error messages for authentication, rate limiting, server errors, and malformed responses.
 - Added release artifact SHA256 checksum generation and verification.
 - Pinned GitHub Actions to commit SHAs.
+- Added mypy type checking for source code.

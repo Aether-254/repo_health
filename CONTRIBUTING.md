@@ -24,6 +24,7 @@ Run these before opening a pull request:
 python -m pytest
 python -m ruff check .
 python -m ruff format --check .
+python -m mypy
 ```
 
 ## Pull Requests

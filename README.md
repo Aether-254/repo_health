@@ -83,6 +83,7 @@ Example output:
 python -m pytest
 python -m ruff check .
 python -m ruff format --check .
+python -m mypy
 ```
 
 本地以源码方式安装：
@@ -135,6 +136,7 @@ GitHub Actions includes:
 - tests with `pytest`
 - linting with `ruff check`
 - formatting check with `ruff format --check`
+- type checking with `mypy`
 - live public repository scan
 - Python package build
 - Shiv `.pyz` build
