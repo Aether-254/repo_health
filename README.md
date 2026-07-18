@@ -57,6 +57,7 @@ Repository URLs are also accepted:
 
 ```bash
 repo-health https://github.com/openai/codex
+repo-health github.com/openai/codex
 ```
 
 Private repositories use PyGithub and require `GITHUB_API_KEY` in `.env`:

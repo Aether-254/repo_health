@@ -69,7 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "repository",
-        help="GitHub repository as owner/name or https://github.com/owner/name.",
+        help="GitHub repository as owner/name, github.com/owner/name, or https://github.com/owner/name.",
     )
     parser.add_argument(
         "--token",
